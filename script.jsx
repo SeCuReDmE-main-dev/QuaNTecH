@@ -84,6 +84,7 @@ function App() {
   // ... (existing state variables)
   const [forecastInput, setForecastInput] = React.useState('');
   const [forecastResult, setForecastResult] = React.useState(null);
+  const [forecastChartData, setForecastChartData] = React.useState(null); // New state for chart data
   const forecastHandlerRef = React.useRef(null);
   const [agentInput, setAgentInput] = React.useState('');
   const [agentOutput, setAgentOutput] = React.useState('');
@@ -102,7 +103,7 @@ function App() {
   React.useEffect(() => {
     const initForecastHandler = async () => {
       forecastHandlerRef.current = new StatsForecastHandler();
-      await forecastHandlerRef.current.initialize();
+      // await forecastHandlerRef.current.initialize(); // Initialize is not defined in the provided stub
     };
     initForecastHandler();
 
@@ -123,8 +124,59 @@ function App() {
 
   const handleForecastSubmit = async () => {
     if (forecastHandlerRef.current && forecastInput) {
-      const result = await forecastHandlerRef.current.predict(forecastInput);
-      setForecastResult(result);
+      const historicalDataString = forecastInput;
+      const historicalData = historicalDataString.split(',').map(Number).filter(n => !isNaN(n));
+
+      if (historicalData.length === 0) {
+        // Handle empty or invalid input if necessary
+        setForecastChartData(null);
+        setForecastResult("Please enter valid comma-separated numbers.");
+        return;
+      }
+
+      const forecastJson = await forecastHandlerRef.current.predict(historicalDataString);
+      setForecastResult(forecastJson); // Keep raw JSON result if needed for display or debugging
+
+      try {
+        const forecastedData = JSON.parse(forecastJson);
+
+        if (!Array.isArray(forecastedData) || !forecastedData.every(item => typeof item === 'number')) {
+          console.error("Forecasted data is not an array of numbers:", forecastedData);
+          setForecastChartData(null);
+          // Optionally set an error message for the user
+          return;
+        }
+        
+        const allData = [...historicalData, ...forecastedData];
+        const labels = allData.map((_, index) => `Point ${index + 1}`);
+
+        const chartData = {
+          labels,
+          datasets: [
+            {
+              label: 'Historical Data',
+              data: historicalData.map((val, idx) => ({ x: labels[idx], y: val })).concat(
+                forecastedData.map((_, idx) => ({ x: labels[historicalData.length + idx], y: null }))
+              ),
+              borderColor: 'rgb(75, 192, 192)',
+              tension: 0.1,
+            },
+            {
+              label: 'Forecasted Data',
+              data: historicalData.map((_, idx) => ({ x: labels[idx], y: null })).concat(
+                forecastedData.map((val, idx) => ({ x: labels[historicalData.length + idx], y: val }))
+              ),
+              borderColor: 'rgb(255, 99, 132)',
+              tension: 0.1,
+            },
+          ],
+        };
+        setForecastChartData(chartData);
+      } catch (error) {
+        console.error("Failed to parse forecast JSON:", error);
+        setForecastChartData(null);
+        // Optionally set an error message for the user
+      }
     }
   };
 
@@ -285,11 +337,15 @@ function App() {
             className="mb-2"
           />
           <Button onClick={handleForecastSubmit}>Submit</Button>
-          {forecastResult && (
-            <pre className="mt-2 p-2 bg-neutral-2 rounded">
-              {forecastResult}
+          {forecastChartData ? (
+            <div className="mt-4" style={{ height: '400px' }}> {/* Added height for visibility */}
+              <Line data={forecastChartData} />
+            </div>
+          ) : forecastResult ? (
+            <pre className="mt-2 p-2 bg-neutral-2 rounded"> 
+              {forecastResult} {/* Show raw result or error if chart data is not available */}
             </pre>
-          )}
+          ) : null}
         </Card>
         
         {/* AI Agent Interaction */}
